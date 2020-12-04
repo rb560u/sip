@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"strings"
 
@@ -29,6 +30,9 @@ import (
 	"github.com/go-logr/logr"
 	metal3 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -162,6 +166,10 @@ func (ml *MachineList) Schedule(sip airshipv1.SIPCluster, c client.Client) error
 		return err
 	}
 
+	// Deploy haproxy WIP
+	logger.Info("START HAPROXY")
+	ml.deployHaproxy(c)
+
 	// If I get here the MachineList should have a selected set of  Machine's
 	// They are in the ScheduleStatus of ToBeScheduled as well as the Role
 	//
@@ -187,6 +195,8 @@ func (ml *MachineList) init(nodes map[airshipv1.VmRoles]airshipv1.NodeSet) {
 func (ml *MachineList) getBMHs(c client.Client) (*metal3.BareMetalHostList, error) {
 	logger := ml.Log.WithValues("SIPCluster", ml.NamespacedName)
 	bmhList := &metal3.BareMetalHostList{}
+	podList := &corev1.PodList{}
+	//secretList := $corev1.Secret{}
 
 	// I am thinking we can add a Label for unsccheduled.
 	// SIP Cluster can change it to scheduled.
@@ -203,11 +213,81 @@ func (ml *MachineList) getBMHs(c client.Client) (*metal3.BareMetalHostList, erro
 		logger.Info("Recieved an error while getting BaremetalHost list", "error", err.Error())
 		return bmhList, err
 	}
+	//logger.Info("RICK_DEBUG list secrets in sipcluster-system")
+	//secrets := c.List(context.Background(), podList, client.InNamespace("sipcluster-system"))
+	logger.Info("RICK_DEBUG list pods in sipcluster-system ns")
+	pods := c.List(context.Background(), podList, client.InNamespace("sipcluster-system"))
+	if pods != nil {
+		fmt.Printf("failed to list pods in namespace kube-system: %v\n", pods)
+		os.Exit(1)
+	}
+	//logger.Info("RICK_SUCCESS pods in kube-system ns: %s", pods)
+	fmt.Printf("pods in namespace sipcluster-system: %v\n", podList.Items)
 	logger.Info("Got a list of hosts", "BaremetalHostCount", len(bmhList.Items))
 	if len(bmhList.Items) > 0 {
 		return bmhList, nil
 	}
 	return bmhList, fmt.Errorf("Unable to identify vBMH available for scheduling. Selecting  %v ", scheduleLabels)
+}
+
+func (ml *MachineList) deployHaproxy(c client.Client){
+	fmt.Println("INSIDE deployHaproxy function")
+	// Using a typed object.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "sipcluster-system",
+			Name:      "haproxy",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Image: "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7",
+					Name:  "haproxy",
+				},
+			},
+		},
+	}
+	fmt.Println("PASSED namespace block")
+	// c is a created client.
+	_ = c.Create(context.Background(), pod)
+
+	// Using a unstructured object.
+	u := &unstructured.Unstructured{}
+	u.Object = map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "name",
+			"namespace": "sipcluster-system",
+		},
+		"spec": map[string]interface{}{
+			"replicas": 2,
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{
+					"foo": "bar",
+				},
+			},
+			"template": map[string]interface{}{
+				"labels": map[string]interface{}{
+					"foo": "bar",
+				},
+				"spec": map[string]interface{}{
+					"containers": []map[string]interface{}{
+						{
+							"name":  "nginx",
+							"image": "nginx",
+						},
+					},
+				},
+			},
+		},
+	}
+	u.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apps",
+		Kind:    "Deployment",
+		Version: "v1",
+	})
+	fmt.Println("CREATING PODS")
+	_ = c.Create(context.Background(), u)
+	fmt.Println("CREATED PODS")
 }
 
 func (ml *MachineList) identifyNodes(sip airshipv1.SIPCluster, bmhList *metal3.BareMetalHostList, c client.Client) error {
