@@ -29,9 +29,54 @@ import (
 	"github.com/go-logr/logr"
 	metal3 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+// haproxy.cfg
+const haproxyConfig = `global
+     stats timeout 30s
+     user root
+     group root
+     daemon
+
+     # Default SSL material locations
+     ca-base /etc/ssl/certs
+     crt-base /etc/ssl/private
+
+     # Default ciphers to use on SSL-enabled listening sockets.
+     # For more information, see ciphers(1SSL). This list is from:
+     #  https://hynek.me/articles/hardening-your-web-servers-ssl-ciphers/
+     # An alternative list with additional directives can be obtained from
+     #  https://mozilla.github.io/server-side-tls/ssl-config-generator/?server=haproxy
+     ssl-default-bind-ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS
+     ssl-default-bind-options no-sslv3
+
+
+
+defaults
+       log     global
+       mode    http
+       option  httplog
+       option  dontlognull
+       timeout connect 5000
+       timeout client  50000
+       timeout server  50000
+
+
+frontend myfrontend
+ bind *:80
+ mode http
+ default_backend mybackend
+
+backend mybackend
+ mode http
+ balance roundrobin
+ option httpchk HEAD / # checks against the index page
+ server web1 172.17.0.2:80 check weight 10
+ server web2 172.17.0.3:80 check weight 20
+`
 
 // ScheduledState
 type ScheduledState string
@@ -161,6 +206,10 @@ func (ml *MachineList) Schedule(sip airshipv1.SIPCluster, c client.Client) error
 		return err
 	}
 
+	// Deploy haproxy WIP
+	logger.Info("START HAPROXY")
+	ml.deployHaproxy(c)
+
 	// If I get here the MachineList should have a selected set of  Machine's
 	// They are in the ScheduleStatus of ToBeScheduled as well as the Role
 	//
@@ -207,6 +256,61 @@ func (ml *MachineList) getBMHs(c client.Client) (*metal3.BareMetalHostList, erro
 		return bmhList, nil
 	}
 	return bmhList, fmt.Errorf("Unable to identify vBMH available for scheduling. Selecting  %v ", scheduleLabels)
+}
+
+func (ml *MachineList) deployHaproxy(c client.Client){
+	// Attempt to create configmap
+        newcm := &corev1.ConfigMap{
+                ObjectMeta: metav1.ObjectMeta{
+                        Name:      "haproxy-config",
+                        Namespace: "sipcluster-system",
+                },
+                Data: map[string]string{
+                        "haproxy.cfg": haproxyConfig,
+                },
+        }
+        c.Create(context.Background(), newcm)
+
+	// Create haproxy pod
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "sipcluster-system",
+			Name:      "haproxy",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Image: "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7",
+					Name:  "haproxy",
+					VolumeMounts: []corev1.VolumeMount{
+					    {
+						Name: "haproxy-cfg",
+						MountPath: "/usr/local/etc/haproxy/haproxy.cfg",
+						SubPath: "haproxy.cfg",
+					    },
+				        },
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "haproxy-cfg",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "haproxy-config",
+							},
+							//Items: []corev1.KeyToPath{
+								//Key: "haproxy.conf",
+								//Path: "haproxy-config",
+							//},
+						},
+					},
+				},
+			},
+		},
+	}
+	// c is a created client.
+	_ = c.Create(context.Background(), pod)
 }
 
 func (ml *MachineList) identifyNodes(sip airshipv1.SIPCluster,
