@@ -58,3 +58,15 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - extensions
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - update
+  - get
+  - list
+  - watch

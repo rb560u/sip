@@ -29,14 +29,12 @@ import (
 	"github.com/PaesslerAG/jsonpath"
 	"github.com/go-logr/logr"
 	metal3 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	//"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	//"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // ScheduledState
@@ -232,87 +230,64 @@ func (ml *MachineList) getBMHs(c client.Client) (*metal3.BareMetalHostList, erro
 	return bmhList, fmt.Errorf("Unable to identify vBMH available for scheduling. Selecting  %v ", scheduleLabels)
 }
 
-func createPod(name, namespace string, image string, c client.Client) {
-	/*
-	pod := &appsv1.Pod{
+func (ml *MachineList) deployHaproxy(c client.Client){
+	fmt.Println("INSIDE deployHaproxy function")
+	// Using a typed object.
+	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"test-label": name,
-			},
+			Namespace: "sipcluster-system",
+			Name:      "haproxy",
 		},
 		Spec: corev1.PodSpec{
-			Containers:            []corev1.Container{{Name: name, Image: image}},
-		},
-	}
-	//cl, err := client.New(cfg, client.Options{})
-	//Expect(err).NotTo(HaveOccurred())
-        c.Create(context.Background(), pod)
-	//Expect(err).NotTo(HaveOccurred())
-	//return pod
-	*/
-
-	/*
-	var dep *appsv1.Deployment
-	var count int32 = 1
-	dep := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: "haproxy", Namespace: "sipcluster-system"},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: &count,
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"foo": "bar"}},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "haproxy", Image: "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7"}}},
+			Containers: []corev1.Container{
+				{
+					Image: "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7",
+					Name:  "haproxy",
+				},
 			},
 		},
 	}
-	//c.Create(context.Background(), dep)
-	//var clientset *kubernetes.Clientset
-	//c.clientset.AppsV1().Deployments(namespace).Create(context.Background(), dep, metav1.CreateOptions{})
-	controllerutil.CreateOrUpdate(context.Background(), c, dep, func() error {
-	return nil})
-	*/
-	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "haproxy", Namespace: "sipcluster-system"}}
+	fmt.Println("PASSED namespace block")
+	// c is a created client.
+	_ = c.Create(context.Background(), pod)
 
-	op, err := controllerutil.CreateOrUpdate(context.TODO(), c, deploy, func() error {
-
-		// Deployment selector is immutable so we set this value only if
-		// a new object is going to be created
-		if deploy.ObjectMeta.CreationTimestamp.IsZero() {
-			deploy.Spec.Selector = &metav1.LabelSelector{
-				MatchLabels: map[string]string{"foo": "bar"},
-			}
-		}
-
-		// update the Deployment pod template
-		deploy.Spec.Template = corev1.PodTemplateSpec{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
+	// Using a unstructured object.
+	u := &unstructured.Unstructured{}
+	u.Object = map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "haproxy",
+			"namespace": "sipcluster-system",
+		},
+		"spec": map[string]interface{}{
+			"replicas": 2,
+			"selector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{
 					"foo": "bar",
 				},
 			},
-			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{
-					{
-						Name:  "haproxy",
-						Image: "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7",
+			"template": map[string]interface{}{
+				"labels": map[string]interface{}{
+					"foo": "bar",
+				},
+				"spec": map[string]interface{}{
+					"containers": []map[string]interface{}{
+						{
+							"name":  "nginx",
+							"image": "nginx",
+						},
 					},
 				},
 			},
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		fmt.Sprintf("Deployment reconcile failed")
-	} else {
-		fmt.Sprintf("Deployment successfully reconciled", "operation", op)
+		},
 	}
-}
-
-func (ml *MachineList) deployHaproxy(c client.Client){
-        createPod("haproxy", "sipcluster-system", "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7", c)
+	u.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apps",
+		Kind:    "Deployment",
+		Version: "v1",
+	})
+	fmt.Println("CREATING PODS")
+	_ = c.Create(context.Background(), u)
+	fmt.Println("CREATED PODS")
 }
 
 func (ml *MachineList) identifyNodes(sip airshipv1.SIPCluster, bmhList *metal3.BareMetalHostList, c client.Client) error {
