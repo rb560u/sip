@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"text/template"
 
-	"github.com/go-logr/logr"
+	//"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierror "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	airshipv1 "sipcluster/pkg/api/v1"
+	//v1 "sipcluster/pkg/api/v1"
 	airshipvms "sipcluster/pkg/vbmh"
 )
 
@@ -35,9 +36,9 @@ type InfraService interface {
 
 // ServiceSet provides access to infrastructure services
 type ServiceSet struct {
-	logger logr.Logger
+	//logger logr.Logger
 
-	sip      *airshipv1.SIPCluster
+	sip      airshipv1.SIPCluster
 	machines *airshipvms.MachineList
 	client   client.Client
 
@@ -46,25 +47,36 @@ type ServiceSet struct {
 
 // NewServiceSet return new instance of ServiceSet
 func NewServiceSet(
-	logger logr.Logger,
-	sip *airshipv1.SIPCluster,
+	//logger logr.Logger,
+	sip airshipv1.SIPCluster,
 	machines *airshipvms.MachineList,
 	client client.Client) ServiceSet {
-	logger = logger.WithValues("SIPCluster", types.NamespacedName{Name: sip.GetNamespace(), Namespace: sip.GetName()})
+	fmt.Println("hello from set.go NewServiceSet func")
+	//logger = logger.WithValues("SIPCluster", types.NamespacedName{Name: sip.GetNamespace(), Namespace: sip.GetName()})
 
 	return ServiceSet{
-		logger:   logger,
+		//logger:   logger,
 		sip:      sip,
 		client:   client,
 		machines: machines,
 	}
 }
 
+// DEBUG seeing if function is called
+func DebugFunction() {
+	fmt.Println("hello from set.go")
+}
+
 // LoadBalancer returns loadbalancer service
 func (ss ServiceSet) LoadBalancer() (InfraService, error) {
+        fmt.Printf("ss_serviceset")
+        fmt.Printf("%+v\n", ss)
+        fmt.Printf("ss_services:")
+	fmt.Printf("%+v\n", ss.services)
 	lb, ok := ss.services[airshipv1.LoadBalancerService]
 	if !ok {
-		ss.logger.Info("sip cluster doesn't have loadbalancer infrastructure service defined")
+		//ss.logger.Info("sip cluster doesn't have loadbalancer infrastructure service defined")
+		fmt.Printf("sip cluster doesn't have loadbalancer infrastructure service defined")
 	}
 	return lb, fmt.Errorf("Loadbalancer service is not defined for sip cluster '%s'/'%s'",
 		ss.sip.GetNamespace(),
@@ -77,23 +89,25 @@ func (ss ServiceSet) ServiceList() []InfraService {
 	for serviceType, serviceConfig := range ss.sip.Spec.InfraServices {
 		switch serviceType {
 		case airshipv1.LoadBalancerService:
-			ss.logger.Info("Service of type '%s' is defined", "service type", serviceType)
+			//ss.logger.Info("Service of type '%s' is defined", "service type", serviceType)
+			fmt.Printf("will add logger")
 			serviceList = append(serviceList,
 				newLB(ss.sip.GetName(),
 					ss.sip.GetNamespace(),
-					ss.logger,
+					//ss.logger,
 					serviceConfig,
 					ss.machines,
 					ss.client))
 		default:
-			ss.logger.Info("Service of type '%s' is unknown to SIPCluster controller", "service type", serviceType)
+			//ss.logger.Info("Service of type '%s' is unknown to SIPCluster controller", "service type", serviceType)
+			fmt.Printf("will add logger")
 		}
 	}
 	return serviceList
 }
 
 func newLB(name, namespace string,
-	logger logr.Logger,
+	//logger logr.Logger,
 	config airshipv1.InfraConfig,
 	machines *airshipvms.MachineList,
 	client client.Client) loadBalancer {
@@ -102,7 +116,7 @@ func newLB(name, namespace string,
 			Name:      name,
 			Namespace: namespace,
 		},
-		logger:   logger,
+		//logger:   logger,
 		config:   config,
 		machines: machines,
 		client:   client,
@@ -112,13 +126,69 @@ func newLB(name, namespace string,
 type loadBalancer struct {
 	client   client.Client
 	sipName  types.NamespacedName
-	logger   logr.Logger
+	//logger   logr.Logger
 	config   airshipv1.InfraConfig
 	machines *airshipvms.MachineList
 }
 
 func (lb loadBalancer) Deploy() error {
-	if lb.config.Image == "" {
+	fmt.Printf("DEBUG_DEPLOY")
+	// Attempt to create configmap
+	newcm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "haproxy-config",
+			Namespace: "sipcluster-system",
+		},
+		Data: map[string]string{
+			"haproxy.cfg": haproxyConfig,
+		},
+	}
+	lb.client.Create(context.Background(), newcm)
+	fmt.Printf("created_cm")
+	//c.Create(context.Background(), newcm)
+
+	// Create haproxy pod
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "sipcluster-system",
+			Name:      "haproxy",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Image: "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7",
+					Name:  "haproxy",
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name:      "haproxy-cfg",
+							MountPath: "/usr/local/etc/haproxy/haproxy.cfg",
+							SubPath:   "haproxy.cfg",
+						},
+					},
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "haproxy-cfg",
+					VolumeSource: corev1.VolumeSource{
+						ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "haproxy-config",
+							},
+							//Items: []corev1.KeyToPath{
+							//Key: "haproxy.conf",
+							//Path: "haproxy-config",
+							//},
+						},
+					},
+				},
+			},
+		},
+	}
+	// c is a created client.
+	lb.client.Create(context.Background(), pod)
+	fmt.Printf("created_haproxy_pod")
+	/*if lb.config.Image == "" {
 		lb.config.Image = DefaultBalancerImage
 	}
 
@@ -127,17 +197,17 @@ func (lb loadBalancer) Deploy() error {
 		return err
 	}
 
-	lb.logger.Info("Applying loadbalancer secret", "secret", secret.GetNamespace()+"/"+secret.GetName())
+	//lb.logger.Info("Applying loadbalancer secret", "secret", secret.GetNamespace()+"/"+secret.GetName())
 	err = applyRuntimeObject(client.ObjectKey{Name: secret.GetName(), Namespace: secret.GetNamespace()}, secret, lb.client)
 	if err != nil {
 		return err
 	}
 
-	lb.logger.Info("Applying loadbalancer pod", "pod", pod.GetNamespace()+"/"+pod.GetName())
+	//lb.logger.Info("Applying loadbalancer pod", "pod", pod.GetNamespace()+"/"+pod.GetName())
 	err = applyRuntimeObject(client.ObjectKey{Name: pod.GetName(), Namespace: pod.GetNamespace()}, pod, lb.client)
 	if err != nil {
 		return err
-	}
+	}*/
 	return nil
 }
 
@@ -199,14 +269,15 @@ func (lb loadBalancer) generateSecret() (*corev1.Secret, error) {
 		Backends:  make([]backend, 0),
 	}
 	for _, machine := range lb.machines.Machines {
-		name := machine.BMH.Name
-		namespace := machine.BMH.Namespace
+		//name := machine.BMH.Name
+		//namespace := machine.BMH.Namespace
 		ip, exists := machine.Data.IPOnInterface[lb.config.NodeInterface]
 		if !exists {
-			lb.logger.Info("Machine does not have backend interface to be forwarded to",
-				"interface", lb.config.NodeInterface,
-				"machine", namespace+"/"+name,
-			)
+			//lb.logger.Info("Machine does not have backend interface to be forwarded to",
+				//"interface", lb.config.NodeInterface,
+				//"machine", namespace+"/"+name,
+			//)
+			fmt.Printf("will add logger")
 			continue
 		}
 		p.Backends = append(p.Backends, backend{IP: ip, Name: machine.BMH.Name, Port: 6443})
@@ -290,4 +361,40 @@ backend kube-apiservers
 {{- $backEnd := . }}
   server {{ $backEnd.Name }} {{ $backEnd.IP }}:{{ $backEnd.Port }} check check-ssl verify none
 {{ end -}}
+`
+
+// haproxy.cfg
+const haproxyConfig = `global
+     stats timeout 30s
+     user root
+     group root
+     daemon
+     # Default SSL material locations
+     ca-base /etc/ssl/certs
+     crt-base /etc/ssl/private
+     # Default ciphers to use on SSL-enabled listening sockets.
+     # For more information, see ciphers(1SSL). This list is from:
+     #  https://hynek.me/articles/hardening-your-web-servers-ssl-ciphers/
+     # An alternative list with additional directives can be obtained from
+     #  https://mozilla.github.io/server-side-tls/ssl-config-generator/?server=haproxy
+     ssl-default-bind-ciphers ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS
+     ssl-default-bind-options no-sslv3
+defaults
+       log     global
+       mode    http
+       option  httplog
+       option  dontlognull
+       timeout connect 5000
+       timeout client  50000
+       timeout server  50000
+frontend myfrontend
+ bind *:80
+ mode http
+ default_backend mybackend
+backend mybackend
+ mode http
+ balance roundrobin
+ option httpchk HEAD / # checks against the index page
+ server web1 172.17.0.2:80 check weight 10
+ server web2 172.17.0.3:80 check weight 20
 `
