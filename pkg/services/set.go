@@ -170,7 +170,10 @@ func (lb loadBalancer) generatePodAndSecret() (*corev1.Pod, *corev1.Secret, erro
 				{
 					Name:    "balancer",
 					Image:   lb.config.Image,
-					Command: []string{"sh", "-c", "set -xe while true; do cat /cfg/MyData; sleep 20; done"},
+					//Command: []string{"sh", "-c", "set -xe while true; do cat /cfg/MyData; sleep 20; done"},
+					//Command: []string{"sh", "-c", "while true; do echo hello; sleep 10;done"},
+					//Command: []string{"sh", "-c", "cp /cfg/haproxy-config /usr/local/etc/haproxy/.; cat /usr/local/etc/haproxy/haproxy-config | base64 --decode &> /usr/local/etc/haproxy/haproxy.cfg; haproxy -f /usr/local/etc/haproxy/haproxy.cfg"},
+					Command: []string{"sh", "-c", "cp /cfg/haproxy-config /usr/local/etc/haproxy/.; cat /usr/local/etc/haproxy/haproxy-config | base64 --decode &> /usr/local/etc/haproxy/haproxy.cfg; while true; do echo hello; sleep 10;done"},
 					VolumeMounts: []corev1.VolumeMount{
 						{
 							Name:      ConfigSecretName,
@@ -220,6 +223,8 @@ func (lb loadBalancer) generateSecret() (*corev1.Secret, error) {
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("DEBUG_secretData")
+	fmt.Println(secretData)
 	return &corev1.Secret{
 	        ObjectMeta: metav1.ObjectMeta{
 			Name:      lb.sipName.Name + "-load-balancer",
