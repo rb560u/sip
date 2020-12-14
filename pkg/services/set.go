@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"text/template"
 
-	//"github.com/go-logr/logr"
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierror "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +36,7 @@ type InfraService interface {
 
 // ServiceSet provides access to infrastructure services
 type ServiceSet struct {
-	//logger logr.Logger
+	logger logr.Logger
 
 	sip      airshipv1.SIPCluster
 	machines *airshipvms.MachineList
@@ -47,36 +47,25 @@ type ServiceSet struct {
 
 // NewServiceSet return new instance of ServiceSet
 func NewServiceSet(
-	//logger logr.Logger,
+	logger logr.Logger,
 	sip airshipv1.SIPCluster,
 	machines *airshipvms.MachineList,
 	client client.Client) ServiceSet {
-	fmt.Println("hello from set.go NewServiceSet func")
-	//logger = logger.WithValues("SIPCluster", types.NamespacedName{Name: sip.GetNamespace(), Namespace: sip.GetName()})
+	logger = logger.WithValues("SIPCluster", types.NamespacedName{Name: sip.GetNamespace(), Namespace: sip.GetName()})
 
 	return ServiceSet{
-		//logger:   logger,
+		logger:   logger,
 		sip:      sip,
 		client:   client,
 		machines: machines,
 	}
 }
 
-// DEBUG seeing if function is called
-func DebugFunction() {
-	fmt.Println("hello from set.go")
-}
-
 // LoadBalancer returns loadbalancer service
 func (ss ServiceSet) LoadBalancer() (InfraService, error) {
-        fmt.Printf("ss_serviceset")
-        fmt.Printf("%+v\n", ss)
-        fmt.Printf("ss_services:")
-	fmt.Printf("%+v\n", ss.services)
 	lb, ok := ss.services[airshipv1.LoadBalancerService]
 	if !ok {
-		//ss.logger.Info("sip cluster doesn't have loadbalancer infrastructure service defined")
-		fmt.Printf("sip cluster doesn't have loadbalancer infrastructure service defined")
+		ss.logger.Info("sip cluster doesn't have loadbalancer infrastructure service defined")
 	}
 	return lb, fmt.Errorf("Loadbalancer service is not defined for sip cluster '%s'/'%s'",
 		ss.sip.GetNamespace(),
@@ -89,25 +78,23 @@ func (ss ServiceSet) ServiceList() []InfraService {
 	for serviceType, serviceConfig := range ss.sip.Spec.InfraServices {
 		switch serviceType {
 		case airshipv1.LoadBalancerService:
-			//ss.logger.Info("Service of type '%s' is defined", "service type", serviceType)
-			fmt.Printf("will add logger")
+			ss.logger.Info("Service of type '%s' is defined", "service type", serviceType)
 			serviceList = append(serviceList,
 				newLB(ss.sip.GetName(),
 					ss.sip.GetNamespace(),
-					//ss.logger,
+					ss.logger,
 					serviceConfig,
 					ss.machines,
 					ss.client))
 		default:
-			//ss.logger.Info("Service of type '%s' is unknown to SIPCluster controller", "service type", serviceType)
-			fmt.Printf("will add logger")
+			ss.logger.Info("Service of type '%s' is unknown to SIPCluster controller", "service type", serviceType)
 		}
 	}
 	return serviceList
 }
 
 func newLB(name, namespace string,
-	//logger logr.Logger,
+	logger logr.Logger,
 	config airshipv1.InfraConfig,
 	machines *airshipvms.MachineList,
 	client client.Client) loadBalancer {
@@ -116,7 +103,7 @@ func newLB(name, namespace string,
 			Name:      name,
 			Namespace: namespace,
 		},
-		//logger:   logger,
+		logger:   logger,
 		config:   config,
 		machines: machines,
 		client:   client,
@@ -126,13 +113,12 @@ func newLB(name, namespace string,
 type loadBalancer struct {
 	client   client.Client
 	sipName  types.NamespacedName
-	//logger   logr.Logger
+	logger   logr.Logger
 	config   airshipv1.InfraConfig
 	machines *airshipvms.MachineList
 }
 
 func (lb loadBalancer) Deploy() error {
-	fmt.Printf("DEBUG_DEPLOY")
 	// Attempt to create configmap
 	newcm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -144,8 +130,6 @@ func (lb loadBalancer) Deploy() error {
 		},
 	}
 	lb.client.Create(context.Background(), newcm)
-	fmt.Printf("created_cm")
-	//c.Create(context.Background(), newcm)
 
 	// Create haproxy pod
 	pod := &corev1.Pod{
@@ -185,9 +169,7 @@ func (lb loadBalancer) Deploy() error {
 			},
 		},
 	}
-	// c is a created client.
 	lb.client.Create(context.Background(), pod)
-	fmt.Printf("created_haproxy_pod")
 	/*if lb.config.Image == "" {
 		lb.config.Image = DefaultBalancerImage
 	}
@@ -269,15 +251,14 @@ func (lb loadBalancer) generateSecret() (*corev1.Secret, error) {
 		Backends:  make([]backend, 0),
 	}
 	for _, machine := range lb.machines.Machines {
-		//name := machine.BMH.Name
-		//namespace := machine.BMH.Namespace
+		name := machine.BMH.Name
+		namespace := machine.BMH.Namespace
 		ip, exists := machine.Data.IPOnInterface[lb.config.NodeInterface]
 		if !exists {
-			//lb.logger.Info("Machine does not have backend interface to be forwarded to",
-				//"interface", lb.config.NodeInterface,
-				//"machine", namespace+"/"+name,
-			//)
-			fmt.Printf("will add logger")
+			lb.logger.Info("Machine does not have backend interface to be forwarded to",
+				"interface", lb.config.NodeInterface,
+				"machine", namespace+"/"+name,
+			)
 			continue
 		}
 		p.Backends = append(p.Backends, backend{IP: ip, Name: machine.BMH.Name, Port: 6443})

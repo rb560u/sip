@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -188,30 +187,19 @@ func (r *SIPClusterReconciler) gatherVBMH(sip airshipv1.SIPCluster) (*airshipvms
 }
 
 func (r *SIPClusterReconciler) deployInfra(sip airshipv1.SIPCluster, machines *airshipvms.MachineList) error {
-	// DEBUG CODE
-	logger := r.Log.WithValues("SIPCluster", r.NamespacedName)
-	logger.Info("DEBUG deploying infra services test")
-	// Try calling set.go DebugFunction
-	airshipsvc.DebugFunction()
-
 	for sName, sConfig := range sip.Spec.InfraServices {
-	        //fmt.Printf("DEBUG_RICK")
-		//fmt.Printf("%+v\n", sip.Spec.InfraServices)
 		// Instantiate
 		service, err := airshipsvc.NewService(sName, sConfig)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("DEBUG_RICK_SERVICES")
-		fmt.Printf("%+v\n", service)
-
 		// Lets deploy the Service
 		err = service.Deploy(sip, machines, r.Client)
 		if err != nil {
 			return err
 		}
 
-		// Did it deploy correctly, letcs check
+		// Did it deploy correctly, lets check
 		err = service.Validate()
 		if err != nil {
 			return err
