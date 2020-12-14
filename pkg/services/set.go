@@ -24,7 +24,7 @@ const (
 	// ConfigSecretName name of the haproxy config secret name/volume/mount
 	ConfigSecretName = "haproxy-config"
 	// DefaultBalancerImage is the image that will be used as load balancer
-	DefaultBalancerImage = "busybox"
+	DefaultBalancerImage = "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7"
 )
 
 // InfraService generalizes inftracture services
@@ -119,58 +119,8 @@ type loadBalancer struct {
 }
 
 func (lb loadBalancer) Deploy() error {
-	// Attempt to create configmap
-	newcm := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "haproxy-config",
-			Namespace: "sipcluster-system",
-		},
-		Data: map[string]string{
-			"haproxy.cfg": haproxyConfig,
-		},
-	}
-	lb.client.Create(context.Background(), newcm)
-
-	// Create haproxy pod
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "sipcluster-system",
-			Name:      "haproxy",
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Image: "docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7",
-					Name:  "haproxy",
-					VolumeMounts: []corev1.VolumeMount{
-						{
-							Name:      "haproxy-cfg",
-							MountPath: "/usr/local/etc/haproxy/haproxy.cfg",
-							SubPath:   "haproxy.cfg",
-						},
-					},
-				},
-			},
-			Volumes: []corev1.Volume{
-				{
-					Name: "haproxy-cfg",
-					VolumeSource: corev1.VolumeSource{
-						ConfigMap: &corev1.ConfigMapVolumeSource{
-							LocalObjectReference: corev1.LocalObjectReference{
-								Name: "haproxy-config",
-							},
-							//Items: []corev1.KeyToPath{
-							//Key: "haproxy.conf",
-							//Path: "haproxy-config",
-							//},
-						},
-					},
-				},
-			},
-		},
-	}
-	lb.client.Create(context.Background(), pod)
-	/*if lb.config.Image == "" {
+	fmt.Printf("DEBUG_DEPLOY")
+	if lb.config.Image == "" {
 		lb.config.Image = DefaultBalancerImage
 	}
 
@@ -179,17 +129,17 @@ func (lb loadBalancer) Deploy() error {
 		return err
 	}
 
-	//lb.logger.Info("Applying loadbalancer secret", "secret", secret.GetNamespace()+"/"+secret.GetName())
+	lb.logger.Info("Applying loadbalancer secret", "secret", secret.GetNamespace()+"/"+secret.GetName())
 	err = applyRuntimeObject(client.ObjectKey{Name: secret.GetName(), Namespace: secret.GetNamespace()}, secret, lb.client)
 	if err != nil {
 		return err
 	}
 
-	//lb.logger.Info("Applying loadbalancer pod", "pod", pod.GetNamespace()+"/"+pod.GetName())
+	lb.logger.Info("Applying loadbalancer pod", "pod", pod.GetNamespace()+"/"+pod.GetName())
 	err = applyRuntimeObject(client.ObjectKey{Name: pod.GetName(), Namespace: pod.GetNamespace()}, pod, lb.client)
 	if err != nil {
 		return err
-	}*/
+	}
 	return nil
 }
 
@@ -203,6 +153,7 @@ func (lb loadBalancer) Type() airshipv1.InfraService {
 }
 
 func (lb loadBalancer) generatePodAndSecret() (*corev1.Pod, *corev1.Secret, error) {
+	fmt.Printf("DEBUG_generatePodAndSecret")
 	secret, err := lb.generateSecret()
 	if err != nil {
 		return nil, nil, err
@@ -212,6 +163,7 @@ func (lb loadBalancer) generatePodAndSecret() (*corev1.Pod, *corev1.Secret, erro
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      lb.sipName.Name + "-load-balancer",
 			Namespace: lb.sipName.Namespace,
+			//Namespace: lb.Namespace,
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
@@ -245,7 +197,7 @@ func (lb loadBalancer) generatePodAndSecret() (*corev1.Pod, *corev1.Secret, erro
 }
 
 func (lb loadBalancer) generateSecret() (*corev1.Secret, error) {
-
+	fmt.Printf("DEBUG_generateSecret")
 	p := proxy{
 		FrontPort: 6443,
 		Backends:  make([]backend, 0),
@@ -269,7 +221,7 @@ func (lb loadBalancer) generateSecret() (*corev1.Secret, error) {
 		return nil, err
 	}
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
+	        ObjectMeta: metav1.ObjectMeta{
 			Name:      lb.sipName.Name + "-load-balancer",
 			Namespace: lb.sipName.Namespace,
 		},
@@ -320,6 +272,7 @@ func applyRuntimeObject(key client.ObjectKey, obj runtime.Object, c client.Clien
 		return err
 	}
 }
+
 
 var defaultTemplate = `global
   log /dev/stdout local0

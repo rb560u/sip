@@ -51,6 +51,7 @@ rules:
   resources:
   - namespaces
   - pods
+  - secrets
   verbs:
   - create
   - delete

@@ -25,7 +25,7 @@ spec:
         loadbalancer:
           optional:
             clusterIP: 1.2.3.4 #<-- this aligns to the VIP IP for undercloud k8s
-          image: haproxy:foo
+          image: docker-open-nc.zc1.cti.att.com/upstream-local/haproxy@sha256:019211bef0f81d5ce95df4ef1e252d37a356eeed28eb7247da2b324fab251ad7
           nodeLabels:
               - airship-masters
           nodePorts:
